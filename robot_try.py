@@ -36,7 +36,7 @@ def read_and_rearrange_positions(file_name):
 
 
 class Robot:
-    def __init__(self, x0, y0, q0,  width):
+    def __init__(self, kp, ki, x0, y0, q0,  width):
 
         self.meters_to_pixel = 3779.52
         self.w = width
@@ -56,12 +56,11 @@ class Robot:
         
         self.closest_obs = None
 
-       # PI Controller parameters
-        self.Kp = 0.1  # Proportional gain
-        self.Ki = 0.02  # Integral gain
-        self.integral_error = 0  # Integral of error
-        self.previous_error = 0  # Previous error
-
+        self.error = 0
+        self.integral_error = 0
+        self.kp = kp
+        self.ki = ki
+    
     def update_target(self):
         self.xg, self.yg = self.target_points[self.current_target_index]
 
@@ -84,44 +83,28 @@ class Robot:
                     dist = distance([self.x0, self.y0], point)
                     self.closest_obs = (point, dist)
         
+        
+
+        
     def kinematics(self, time_step):
-        error = distance((self.x0, self.y0), (self.xg, self.yg))
-        
-        # Update integral of error
-        self.integral_error += error * time_step
+        print(self.xg, self.x0)
+        # linear hız
+        self.error = math.sqrt((self.xg - self.x0)**2 + (self.yg - self.y0)**2)
+        v = self.kp * self.error
 
-        # Calculate control action
-        control_action = self.Kp * error + self.Ki * self.integral_error
+        # angular hız
+        x_d = self.xg - self.x0
+        y_d =self.yg - self.y0
+        desired_heading = math.atan2(y_d, x_d)
+        heading_error = math.atan2(math.sin(desired_heading - self.q0), math.cos(desired_heading - self.q0))
+        self.integral_error += heading_error 
+        w = self.kp * heading_error + self.ki * self.integral_error
 
-        # Update velocities based on control action
-        self.vl = max(min(self.max_speed, self.vl + control_action), self.min_speed)
-        self.vr = max(min(self.max_speed, self.vr + control_action), self.min_speed)
 
-        # Update position and orientation
-        self.x0 += ((self.vl + self.vr) / 2) * math.cos(self.q0) * time_step
-        self.y0 -= ((self.vl + self.vr) / 2) * math.sin(self.q0) * time_step
-        self.q0 += (self.vr - self.vl) / self.w * time_step
+        self.x0 += v * math.cos(self.q0) *time_step
+        self.y0 += v * math.sin(self.q0) *time_step
+        self.q0 += w *time_step
     
-
-    def turn_left(self):
-        self.q0 -= math.radians(10)  # 5 derece sola dön
-        if self.q0 < -math.pi:
-            self.q0 += 2 * math.pi
-
-    def turn_right(self):
-        self.q0 += math.radians(10)  # 5 derece sağa dön
-        if self.q0 > math.pi:
-            self.q0 -= 2 * math.pi
-            
-    def move_backward(self):
-        self.vr = -self.min_speed
-        self.vl = -self.min_speed/2
-        
-    def move_forward(self):
-        self.vr = self.min_speed
-        self.vl = self.min_speed
-
-
     def calculate_reward(self, WIDTH, HEIGHT):
         track_width = 60
         cx = 650  # Pistin merkezi x koordinatı
@@ -159,13 +142,17 @@ class Robot:
 
         # Apply the action to update velocities
         if action == 0 : #"accelerate"
-            self.move_forward()
+            self.vr += 0.001 * self.meters_to_pixel
+            self.vl += 0.001 * self.meters_to_pixel
         elif action == 1: #"brake":
-            self.move_backward()
+            self.vr -= 0.001 * self.meters_to_pixel
+            self.vl -= 0.001 * self.meters_to_pixel
         elif action == 2: #"turn_right":
-             self.turn_left()
+            self.vr -= 0.0005 * self.meters_to_pixel
+            self.vl += 0.0005 * self.meters_to_pixel
         elif action == 3: #"turn_left":
-            self.turn_right()
+            self.vr += 0.0005 * self.meters_to_pixel
+            self.vl -= 0.0005 * self.meters_to_pixel
 
         # Update car kinematics
         self.kinematics(time_step)  # Consider defining your time_step or pass it as parameter
